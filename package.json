@@ -1,0 +1,17 @@
+{
+  "name": "step-1",
+  "version": "0.0.0",
+  "description": "Hello world browserify",
+  "main": "index.js",
+  "scripts": {
+    "bundle": "browserify -r lodash > bundle.js"
+  },
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "browserify": "^4.1.10"
+  },
+  "dependencies": {
+    "lodash": "^2.4.1"
+  }
+}
