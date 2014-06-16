@@ -5,6 +5,7 @@
   http.get({path: '/tree.json'}, function (res) {
     var div = document.getElementById('container')
 
+    // res is a node response stream.
     res.on('data', function (d) {
       div.innerHTML += d
     })
