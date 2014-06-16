@@ -1,21 +1,22 @@
-<script src="bundle.js"></script>
-<script type="text/javascript">
-  var http = require('http')
-
-  http.get({path: '/tree.json'}, function (res) {
-    var div = document.getElementById('container')
-
-    // res is a node response stream.
-    res.on('data', function (d) {
-      div.innerHTML += d
-    })
-
-    res.on('end', function () {
-      console.log('end!')
-    })
-  })
-
-</script>
 <body>
   <div id="container"></div>
 </body>
+<script src="bundle.js"></script>
+<script type="text/javascript">
+  var Stream = require('buffered-xhr-stream')
+    , div = document.getElementById('container')
+    , calls = 0
+
+  var stream = new Stream({url: '/tree.json'})
+
+  stream.on('data', function (d) {
+    // pause the stream every so often
+    if (++calls % 5 === 0) {
+      stream.pause()
+    }
+    div.innerHTML += d
+  })
+
+  // stream.resume will keep emitting data
+
+</script>

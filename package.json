@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "bundle": "browserify -r http > bundle.js"
+    "bundle": "browserify -r buffered-xhr-stream > bundle.js"
   },
   "author": "",
   "license": "ISC",
@@ -12,6 +12,7 @@
     "browserify": "^4.1.10"
   },
   "dependencies": {
-    "request": "^2.36.0"
+    "request": "^2.36.0",
+    "buffered-xhr-stream": "^0.1.3"
   }
 }
