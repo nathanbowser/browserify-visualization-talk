@@ -1,22 +1,23 @@
 <body>
-  <div id="container"></div>
+  <div id="container">
+  </div>
 </body>
 <script src="bundle.js"></script>
 <script type="text/javascript">
   var Stream = require('buffered-xhr-stream')
+    , JSONStream = require('JSONStream')
     , div = document.getElementById('container')
     , calls = 0
+    , stream = new Stream({url: '/tree.json'})
 
-  var stream = new Stream({url: '/tree.json'})
-
-  stream.on('data', function (d) {
+  stream.pipe(JSONStream.parse(['rows', true])).on('data', function (d) {
     // pause the stream every so often
     if (++calls % 5 === 0) {
       stream.pause()
     }
-    div.innerHTML += d
+    var node = document.createElement('div')
+    node.appendChild(document.createTextNode(d.key))
+    container.appendChild(node)
   })
-
-  // stream.resume will keep emitting data
 
 </script>
