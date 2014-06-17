@@ -1,23 +1,84 @@
-<body>
-  <div id="container">
-  </div>
-</body>
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <link href="//fonts.googleapis.com/css?family=Source+Sans Pro:200italic,200,300italic,300,400italic,400,600italic,600,700italic,700,900italic,900" rel="stylesheet" type="text/css">
+    <style>
+      body {
+        text-align: center;
+        font-family: 'Source Sans Pro';
+      }
+
+      #container {
+        display: inline-block;
+        position: relative;
+        width: 600px;
+        height: 1000px;
+      }
+
+      svg {
+        fill: white;
+      }
+
+      svg .toggle-group {
+        fill: black !important;
+      }
+
+      svg .node:first-child .toggle-group {
+        display: none;
+      }
+
+      svg .toggle-group rect {
+        fill: transparent;
+      }
+
+      svg .toggle-group .toggle-icon {
+        -webkit-transform-origin: 18px 0px;
+        -webkit-transform: rotate(0deg);
+        -webkit-transition: -webkit-transform 400ms;
+      }
+
+      svg .toggle-group .toggle-icon.expanded {
+        -webkit-transform: rotate(90deg);
+      }
+
+      svg .toggle-group .toggle-icon.leaf {
+        display: none !important;
+      }
+
+      svg text {
+        fill: black;
+      }
+
+      svg .green {
+        fill: #96cd00;
+      }
+
+      svg .red {
+        fill: #f35132;
+      }
+
+    </style>
+  </head>
+  <body>
+    <div id="container"></div>
+    <svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
+      <g id="collapsed">
+        <path d="M0,8.99900000000001 C0,8.99900000000001 0,0 0,0 C0,0 5.999,4.506 5.999,4.506 C5.999,4.506 0,8.99900000000001 0,8.99900000000001 Z "></path>
+      </g>
+    </svg>
+  </body>
+</html>
 <script src="bundle.js"></script>
 <script type="text/javascript">
-  var Stream = require('buffered-xhr-stream')
-    , JSONStream = require('JSONStream')
-    , div = document.getElementById('container')
-    , calls = 0
-    , stream = new Stream({url: '/tree.json'})
+  var JSONStream = require('JSONStream')
+    , http = require('http')
+    , Tree = require('tree')
+    , container = document.getElementById('container')
 
-  stream.pipe(JSONStream.parse(['rows', true])).on('data', function (d) {
-    // pause the stream every so often
-    if (++calls % 5 === 0) {
-      stream.pause()
-    }
-    var node = document.createElement('div')
-    node.appendChild(document.createTextNode(d.key))
-    container.appendChild(node)
+  http.get('/tree.json?depth=4', function (res) {
+    var tree = new Tree(res.pipe(JSONStream.parse([true])))
+    container.appendChild(tree.render().el.node())
   })
 
 </script>
