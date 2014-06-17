@@ -71,14 +71,13 @@
 </html>
 <script src="bundle.js"></script>
 <script type="text/javascript">
-  var JSONStream = require('JSONStream')
-    , http = require('http')
+  var websocket = require('websocket-stream')
+    , ws = websocket('ws://localhost:3000')
+    , es = require('event-stream')
     , Tree = require('tree')
     , container = document.getElementById('container')
 
-  http.get('/tree.json?depth=4', function (res) {
-    var tree = new Tree(res.pipe(JSONStream.parse([true])))
-    container.appendChild(tree.render().el.node())
-  })
+  var tree = new Tree(ws.pipe(es.parse()))
+  container.appendChild(tree.render().el.node())
 
 </script>

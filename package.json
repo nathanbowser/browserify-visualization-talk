@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "bundle": "browserify -r http -r JSONStream -r ./tree:tree  > bundle.js"
+    "bundle": "browserify -r http -r JSONStream -r websocket-stream -r event-stream -r ./tree:tree  > bundle.js"
   },
   "author": "",
   "license": "ISC",
@@ -14,6 +14,10 @@
   "dependencies": {
     "request": "^2.36.0",
     "JSONStream": "^0.8.3",
-    "d3": "^3.4.8"
+    "d3": "^3.4.8",
+    "websocket-stream": "^0.5.1",
+    "ws": "^0.4.31",
+    "ecstatic": "^0.5.3",
+    "event-stream": "^3.1.5"
   }
 }

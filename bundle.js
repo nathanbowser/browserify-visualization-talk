@@ -2520,7 +2520,7 @@ http.STATUS_CODES = {
     510 : 'Not Extended',               // RFC 2774
     511 : 'Network Authentication Required' // RFC 6585
 };
-},{"./lib/request":11,"events":8,"url":34}],11:[function(require,module,exports){
+},{"./lib/request":11,"events":8,"url":35}],11:[function(require,module,exports){
 var Stream = require('stream');
 var Response = require('./response');
 var Base64 = require('Base64');
@@ -2833,7 +2833,7 @@ var isArray = Array.isArray || function (xs) {
     return Object.prototype.toString.call(xs) === '[object Array]';
 };
 
-},{"stream":33,"util":36}],13:[function(require,module,exports){
+},{"stream":33,"util":37}],13:[function(require,module,exports){
 ;(function () {
 
   var object = typeof exports != 'undefined' ? exports : this; // #8: web workers
@@ -5870,6 +5870,199 @@ Stream.prototype.pipe = function(dest, options) {
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+var Buffer = require('buffer').Buffer;
+
+function assertEncoding(encoding) {
+  if (encoding && !Buffer.isEncoding(encoding)) {
+    throw new Error('Unknown encoding: ' + encoding);
+  }
+}
+
+var StringDecoder = exports.StringDecoder = function(encoding) {
+  this.encoding = (encoding || 'utf8').toLowerCase().replace(/[-_]/, '');
+  assertEncoding(encoding);
+  switch (this.encoding) {
+    case 'utf8':
+      // CESU-8 represents each of Surrogate Pair by 3-bytes
+      this.surrogateSize = 3;
+      break;
+    case 'ucs2':
+    case 'utf16le':
+      // UTF-16 represents each of Surrogate Pair by 2-bytes
+      this.surrogateSize = 2;
+      this.detectIncompleteChar = utf16DetectIncompleteChar;
+      break;
+    case 'base64':
+      // Base-64 stores 3 bytes in 4 chars, and pads the remainder.
+      this.surrogateSize = 3;
+      this.detectIncompleteChar = base64DetectIncompleteChar;
+      break;
+    default:
+      this.write = passThroughWrite;
+      return;
+  }
+
+  this.charBuffer = new Buffer(6);
+  this.charReceived = 0;
+  this.charLength = 0;
+};
+
+
+StringDecoder.prototype.write = function(buffer) {
+  var charStr = '';
+  var offset = 0;
+
+  // if our last write ended with an incomplete multibyte character
+  while (this.charLength) {
+    // determine how many remaining bytes this buffer has to offer for this char
+    var i = (buffer.length >= this.charLength - this.charReceived) ?
+                this.charLength - this.charReceived :
+                buffer.length;
+
+    // add the new bytes to the char buffer
+    buffer.copy(this.charBuffer, this.charReceived, offset, i);
+    this.charReceived += (i - offset);
+    offset = i;
+
+    if (this.charReceived < this.charLength) {
+      // still not enough chars in this buffer? wait for more ...
+      return '';
+    }
+
+    // get the character that was split
+    charStr = this.charBuffer.slice(0, this.charLength).toString(this.encoding);
+
+    // lead surrogate (D800-DBFF) is also the incomplete character
+    var charCode = charStr.charCodeAt(charStr.length - 1);
+    if (charCode >= 0xD800 && charCode <= 0xDBFF) {
+      this.charLength += this.surrogateSize;
+      charStr = '';
+      continue;
+    }
+    this.charReceived = this.charLength = 0;
+
+    // if there are no more bytes in this buffer, just emit our char
+    if (i == buffer.length) return charStr;
+
+    // otherwise cut off the characters end from the beginning of this buffer
+    buffer = buffer.slice(i, buffer.length);
+    break;
+  }
+
+  var lenIncomplete = this.detectIncompleteChar(buffer);
+
+  var end = buffer.length;
+  if (this.charLength) {
+    // buffer the incomplete character bytes we got
+    buffer.copy(this.charBuffer, 0, buffer.length - lenIncomplete, end);
+    this.charReceived = lenIncomplete;
+    end -= lenIncomplete;
+  }
+
+  charStr += buffer.toString(this.encoding, 0, end);
+
+  var end = charStr.length - 1;
+  var charCode = charStr.charCodeAt(end);
+  // lead surrogate (D800-DBFF) is also the incomplete character
+  if (charCode >= 0xD800 && charCode <= 0xDBFF) {
+    var size = this.surrogateSize;
+    this.charLength += size;
+    this.charReceived += size;
+    this.charBuffer.copy(this.charBuffer, size, 0, size);
+    this.charBuffer.write(charStr.charAt(charStr.length - 1), this.encoding);
+    return charStr.substring(0, end);
+  }
+
+  // or just emit the charStr
+  return charStr;
+};
+
+StringDecoder.prototype.detectIncompleteChar = function(buffer) {
+  // determine how many bytes we have to check at the end of this buffer
+  var i = (buffer.length >= 3) ? 3 : buffer.length;
+
+  // Figure out if one of the last i bytes of our buffer announces an
+  // incomplete char.
+  for (; i > 0; i--) {
+    var c = buffer[buffer.length - i];
+
+    // See http://en.wikipedia.org/wiki/UTF-8#Description
+
+    // 110XXXXX
+    if (i == 1 && c >> 5 == 0x06) {
+      this.charLength = 2;
+      break;
+    }
+
+    // 1110XXXX
+    if (i <= 2 && c >> 4 == 0x0E) {
+      this.charLength = 3;
+      break;
+    }
+
+    // 11110XXX
+    if (i <= 3 && c >> 3 == 0x1E) {
+      this.charLength = 4;
+      break;
+    }
+  }
+
+  return i;
+};
+
+StringDecoder.prototype.end = function(buffer) {
+  var res = '';
+  if (buffer && buffer.length)
+    res = this.write(buffer);
+
+  if (this.charReceived) {
+    var cr = this.charReceived;
+    var buf = this.charBuffer;
+    var enc = this.encoding;
+    res += buf.slice(0, cr).toString(enc);
+  }
+
+  return res;
+};
+
+function passThroughWrite(buffer) {
+  return buffer.toString(this.encoding);
+}
+
+function utf16DetectIncompleteChar(buffer) {
+  var incomplete = this.charReceived = buffer.length % 2;
+  this.charLength = incomplete ? 2 : 0;
+  return incomplete;
+}
+
+function base64DetectIncompleteChar(buffer) {
+  var incomplete = this.charReceived = buffer.length % 3;
+  this.charLength = incomplete ? 3 : 0;
+  return incomplete;
+}
+
+},{"buffer":5}],35:[function(require,module,exports){
+// Copyright Joyent, Inc. and other Node contributors.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a
+// copy of this software and associated documentation files (the
+// "Software"), to deal in the Software without restriction, including
+// without limitation the rights to use, copy, modify, merge, publish,
+// distribute, sublicense, and/or sell copies of the Software, and to permit
+// persons to whom the Software is furnished to do so, subject to the
+// following conditions:
+//
+// The above copyright notice and this permission notice shall be included
+// in all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+// NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+// DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+// USE OR OTHER DEALINGS IN THE SOFTWARE.
+
 var punycode = require('punycode');
 
 exports.parse = urlParse;
@@ -6557,14 +6750,14 @@ function isNullOrUndefined(arg) {
   return  arg == null;
 }
 
-},{"punycode":16,"querystring":19}],35:[function(require,module,exports){
+},{"punycode":16,"querystring":19}],36:[function(require,module,exports){
 module.exports = function isBuffer(arg) {
   return arg && typeof arg === 'object'
     && typeof arg.copy === 'function'
     && typeof arg.fill === 'function'
     && typeof arg.readUInt8 === 'function';
 }
-},{}],36:[function(require,module,exports){
+},{}],37:[function(require,module,exports){
 (function (process,global){
 // Copyright Joyent, Inc. and other Node contributors.
 //
@@ -7154,7 +7347,7 @@ function hasOwnProperty(obj, prop) {
 }
 
 }).call(this,require("FWaASH"),typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"./support/isBuffer":35,"FWaASH":15,"inherits":14}],37:[function(require,module,exports){
+},{"./support/isBuffer":36,"FWaASH":15,"inherits":14}],38:[function(require,module,exports){
 !function() {
   var d3 = {
     version: "3.4.8"
@@ -16410,7 +16603,891 @@ function hasOwnProperty(obj, prop) {
     this.d3 = d3;
   }
 }();
-},{}],38:[function(require,module,exports){
+},{}],"event-stream":[function(require,module,exports){
+module.exports=require('ut3LTG');
+},{}],"ut3LTG":[function(require,module,exports){
+(function (process,global){
+//filter will reemit the data if cb(err,pass) pass is truthy
+
+// reduce is more tricky
+// maybe we want to group the reductions or emit progress updates occasionally
+// the most basic reduce just emits one 'data' event after it has recieved 'end'
+
+var Stream = require('stream').Stream
+  , es = exports
+  , through = require('through')
+  , from = require('from')
+  , duplex = require('duplexer')
+  , map = require('map-stream')
+  , pause = require('pause-stream')
+  , split = require('split')
+  , pipeline = require('stream-combiner')
+  , immediately = global.setImmediate || process.nextTick;
+
+es.Stream = Stream //re-export Stream from core
+es.through = through
+es.from = from
+es.duplex = duplex
+es.map = map
+es.pause = pause
+es.split = split
+es.pipeline = es.connect = es.pipe = pipeline
+// merge / concat
+//
+// combine multiple streams into a single stream.
+// will emit end only once
+
+es.concat = //actually this should be called concat
+es.merge = function (/*streams...*/) {
+  var toMerge = [].slice.call(arguments)
+  var stream = new Stream()
+  stream.setMaxListeners(0) // allow adding more than 11 streams
+  var endCount = 0
+  stream.writable = stream.readable = true
+
+  toMerge.forEach(function (e) {
+    e.pipe(stream, {end: false})
+    var ended = false
+    e.on('end', function () {
+      if(ended) return
+      ended = true
+      endCount ++
+      if(endCount == toMerge.length)
+        stream.emit('end') 
+    })
+  })
+  stream.write = function (data) {
+    this.emit('data', data)
+  }
+  stream.destroy = function () {
+    toMerge.forEach(function (e) {
+      if(e.destroy) e.destroy()
+    })
+  }
+  return stream
+}
+
+
+// writable stream, collects all events into an array 
+// and calls back when 'end' occurs
+// mainly I'm using this to test the other functions
+
+es.writeArray = function (done) {
+  if ('function' !== typeof done)
+    throw new Error('function writeArray (done): done must be function')
+
+  var a = new Stream ()
+    , array = [], isDone = false
+  a.write = function (l) {
+    array.push(l)
+  }
+  a.end = function () {
+    isDone = true
+    done(null, array)
+  }
+  a.writable = true
+  a.readable = false
+  a.destroy = function () {
+    a.writable = a.readable = false
+    if(isDone) return
+    done(new Error('destroyed before end'), array)
+  }
+  return a
+}
+
+//return a Stream that reads the properties of an object
+//respecting pause() and resume()
+
+es.readArray = function (array) {
+  var stream = new Stream()
+    , i = 0
+    , paused = false
+    , ended = false
+ 
+  stream.readable = true  
+  stream.writable = false
+ 
+  if(!Array.isArray(array))
+    throw new Error('event-stream.read expects an array')
+  
+  stream.resume = function () {
+    if(ended) return
+    paused = false
+    var l = array.length
+    while(i < l && !paused && !ended) {
+      stream.emit('data', array[i++])
+    }
+    if(i == l && !ended)
+      ended = true, stream.readable = false, stream.emit('end')
+  }
+  process.nextTick(stream.resume)
+  stream.pause = function () {
+     paused = true
+  }
+  stream.destroy = function () {
+    ended = true
+    stream.emit('close')
+  }
+  return stream
+}
+
+//
+// readable (asyncFunction)
+// return a stream that calls an async function while the stream is not paused.
+//
+// the function must take: (count, callback) {...
+//
+
+es.readable =
+function (func, continueOnError) {
+  var stream = new Stream()
+    , i = 0
+    , paused = false
+    , ended = false
+    , reading = false
+
+  stream.readable = true  
+  stream.writable = false
+ 
+  if('function' !== typeof func)
+    throw new Error('event-stream.readable expects async function')
+  
+  stream.on('end', function () { ended = true })
+  
+  function get (err, data) {
+    
+    if(err) {
+      stream.emit('error', err)
+      if(!continueOnError) stream.emit('end')
+    } else if (arguments.length > 1)
+      stream.emit('data', data)
+
+    immediately(function () {
+      if(ended || paused || reading) return
+      try {
+        reading = true
+        func.call(stream, i++, function () {
+          reading = false
+          get.apply(null, arguments)
+        })
+      } catch (err) {
+        stream.emit('error', err)    
+      }
+    })
+  }
+  stream.resume = function () {
+    paused = false
+    get()
+  }
+  process.nextTick(get)
+  stream.pause = function () {
+     paused = true
+  }
+  stream.destroy = function () {
+    stream.emit('end')
+    stream.emit('close')
+    ended = true
+  }
+  return stream
+}
+
+
+//
+// map sync
+//
+
+es.mapSync = function (sync) { 
+  return es.through(function write(data) {
+    var mappedData = sync(data)
+    if (typeof mappedData !== 'undefined')
+      this.emit('data', mappedData)
+  })
+}
+
+//
+// log just print out what is coming through the stream, for debugging
+//
+
+es.log = function (name) {
+  return es.through(function (data) {
+    var args = [].slice.call(arguments)
+    if(name) console.error(name, data)
+    else     console.error(data)
+    this.emit('data', data)
+  })
+}
+
+
+//
+// child -- pipe through a child process
+//
+
+es.child = function (child) {
+
+  return es.duplex(child.stdin, child.stdout)
+
+}
+
+//
+// parse
+//
+// must be used after es.split() to ensure that each chunk represents a line
+// source.pipe(es.split()).pipe(es.parse())
+
+es.parse = function () { 
+  return es.through(function (data) {
+    var obj
+    try {
+      if(data) //ignore empty lines
+        obj = JSON.parse(data.toString())
+    } catch (err) {
+      return console.error(err, 'attemping to parse:', data)
+    }
+    //ignore lines that where only whitespace.
+    if(obj !== undefined)
+      this.emit('data', obj)
+  })
+}
+//
+// stringify
+//
+
+es.stringify = function () { 
+  var Buffer = require('buffer').Buffer
+  return es.mapSync(function (e){ 
+    return JSON.stringify(Buffer.isBuffer(e) ? e.toString() : e) + '\n'
+  }) 
+}
+
+//
+// replace a string within a stream.
+//
+// warn: just concatenates the string and then does str.split().join(). 
+// probably not optimal.
+// for smallish responses, who cares?
+// I need this for shadow-npm so it's only relatively small json files.
+
+es.replace = function (from, to) {
+  return es.pipeline(es.split(from), es.join(to))
+} 
+
+//
+// join chunks with a joiner. just like Array#join
+// also accepts a callback that is passed the chunks appended together
+// this is still supported for legacy reasons.
+// 
+
+es.join = function (str) {
+  
+  //legacy api
+  if('function' === typeof str)
+    return es.wait(str)
+
+  var first = true
+  return es.through(function (data) {
+    if(!first)
+      this.emit('data', str)
+    first = false
+    this.emit('data', data)
+    return true
+  })
+}
+
+
+//
+// wait. callback when 'end' is emitted, with all chunks appended as string.
+//
+
+es.wait = function (callback) {
+  var body = ''
+  return es.through(function (data) { body += data },
+    function () {
+      this.emit('data', body)
+      this.emit('end')
+      if(callback) callback(null, body)
+    })
+}
+
+es.pipeable = function () {
+  throw new Error('[EVENT-STREAM] es.pipeable is deprecated')
+}
+
+}).call(this,require("FWaASH"),typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
+},{"FWaASH":15,"buffer":5,"duplexer":41,"from":42,"map-stream":43,"pause-stream":44,"split":45,"stream":33,"stream-combiner":46,"through":47}],41:[function(require,module,exports){
+var Stream = require("stream")
+var writeMethods = ["write", "end", "destroy"]
+var readMethods = ["resume", "pause"]
+var readEvents = ["data", "close"]
+var slice = Array.prototype.slice
+
+module.exports = duplex
+
+function forEach (arr, fn) {
+    if (arr.forEach) {
+        return arr.forEach(fn)
+    }
+
+    for (var i = 0; i < arr.length; i++) {
+        fn(arr[i], i)
+    }
+}
+
+function duplex(writer, reader) {
+    var stream = new Stream()
+    var ended = false
+
+    forEach(writeMethods, proxyWriter)
+
+    forEach(readMethods, proxyReader)
+
+    forEach(readEvents, proxyStream)
+
+    reader.on("end", handleEnd)
+
+    writer.on("drain", function() {
+      stream.emit("drain")
+    })
+
+    writer.on("error", reemit)
+    reader.on("error", reemit)
+
+    stream.writable = writer.writable
+    stream.readable = reader.readable
+
+    return stream
+
+    function proxyWriter(methodName) {
+        stream[methodName] = method
+
+        function method() {
+            return writer[methodName].apply(writer, arguments)
+        }
+    }
+
+    function proxyReader(methodName) {
+        stream[methodName] = method
+
+        function method() {
+            stream.emit(methodName)
+            var func = reader[methodName]
+            if (func) {
+                return func.apply(reader, arguments)
+            }
+            reader.emit(methodName)
+        }
+    }
+
+    function proxyStream(methodName) {
+        reader.on(methodName, reemit)
+
+        function reemit() {
+            var args = slice.call(arguments)
+            args.unshift(methodName)
+            stream.emit.apply(stream, args)
+        }
+    }
+
+    function handleEnd() {
+        if (ended) {
+            return
+        }
+        ended = true
+        var args = slice.call(arguments)
+        args.unshift("end")
+        stream.emit.apply(stream, args)
+    }
+
+    function reemit(err) {
+        stream.emit("error", err)
+    }
+}
+
+},{"stream":33}],42:[function(require,module,exports){
+(function (process){
+
+'use strict';
+
+var Stream = require('stream')
+
+// from
+//
+// a stream that reads from an source.
+// source may be an array, or a function.
+// from handles pause behaviour for you.
+
+module.exports =
+function from (source) {
+  if(Array.isArray(source)) {
+    source = source.slice()
+    return from (function (i) {
+      if(source.length)
+        this.emit('data', source.shift())
+      else
+        this.emit('end')
+      return true
+    })
+  }
+  var s = new Stream(), i = 0
+  s.ended = false
+  s.started = false
+  s.readable = true
+  s.writable = false
+  s.paused = false
+  s.ended = false
+  s.pause = function () {
+    s.started = true
+    s.paused = true
+  }
+  function next () {
+    s.started = true
+    if(s.ended) return
+    while(!s.ended && !s.paused && source.call(s, i++, function () {
+      if(!s.ended && !s.paused)
+          next()
+    }))
+      ;
+  }
+  s.resume = function () {
+    s.started = true
+    s.paused = false
+    next()
+  }
+  s.on('end', function () {
+    s.ended = true
+    s.readable = false
+    process.nextTick(s.destroy)
+  })
+  s.destroy = function () {
+    s.ended = true
+    s.emit('close') 
+  }
+  /*
+    by default, the stream will start emitting at nextTick
+    if you want, you can pause it, after pipeing.
+    you can also resume before next tick, and that will also
+    work.
+  */
+  process.nextTick(function () {
+    if(!s.started) s.resume()
+  })
+  return s
+}
+
+}).call(this,require("FWaASH"))
+},{"FWaASH":15,"stream":33}],43:[function(require,module,exports){
+(function (process){
+//filter will reemit the data if cb(err,pass) pass is truthy
+
+// reduce is more tricky
+// maybe we want to group the reductions or emit progress updates occasionally
+// the most basic reduce just emits one 'data' event after it has recieved 'end'
+
+
+var Stream = require('stream').Stream
+
+
+//create an event stream and apply function to each .write
+//emitting each response as data
+//unless it's an empty callback
+
+module.exports = function (mapper, opts) {
+
+  var stream = new Stream()
+    , self = this
+    , inputs = 0
+    , outputs = 0
+    , ended = false
+    , paused = false
+    , destroyed = false
+    , lastWritten = 0
+    , inNext = false
+
+  this.opts = opts || {};
+  var errorEventName = this.opts.failures ? 'failure' : 'error';
+
+  // Items that are not ready to be written yet (because they would come out of
+  // order) get stuck in a queue for later.
+  var writeQueue = {}
+
+  stream.writable = true
+  stream.readable = true
+
+  function queueData (data, number) {
+    var nextToWrite = lastWritten + 1
+
+    if (number === nextToWrite) {
+      // If it's next, and its not undefined write it
+      if (data !== undefined) {
+        stream.emit.apply(stream, ['data', data])
+      }
+      lastWritten ++
+      nextToWrite ++
+    } else {
+      // Otherwise queue it for later.
+      writeQueue[number] = data
+    }
+
+    // If the next value is in the queue, write it
+    if (writeQueue.hasOwnProperty(nextToWrite)) {
+      var dataToWrite = writeQueue[nextToWrite]
+      delete writeQueue[nextToWrite]
+      return queueData(dataToWrite, nextToWrite)
+    }
+
+    outputs ++
+    if(inputs === outputs) {
+      if(paused) paused = false, stream.emit('drain') //written all the incoming events
+      if(ended) end()
+    }
+  }
+
+  function next (err, data, number) {
+    if(destroyed) return
+    inNext = true
+
+    if (!err || self.opts.failures) {
+      queueData(data, number)
+    }
+
+    if (err) {
+      stream.emit.apply(stream, [ errorEventName, err ]);
+    }
+
+    inNext = false;
+  }
+
+  // Wrap the mapper function by calling its callback with the order number of
+  // the item in the stream.
+  function wrappedMapper (input, number, callback) {
+    return mapper.call(null, input, function(err, data){
+      callback(err, data, number)
+    })
+  }
+
+  stream.write = function (data) {
+    if(ended) throw new Error('map stream is not writable')
+    inNext = false
+    inputs ++
+
+    try {
+      //catch sync errors and handle them like async errors
+      var written = wrappedMapper(data, inputs, next)
+      paused = (written === false)
+      return !paused
+    } catch (err) {
+      //if the callback has been called syncronously, and the error
+      //has occured in an listener, throw it again.
+      if(inNext)
+        throw err
+      next(err)
+      return !paused
+    }
+  }
+
+  function end (data) {
+    //if end was called with args, write it, 
+    ended = true //write will emit 'end' if ended is true
+    stream.writable = false
+    if(data !== undefined) {
+      return queueData(data, inputs)
+    } else if (inputs == outputs) { //wait for processing 
+      stream.readable = false, stream.emit('end'), stream.destroy() 
+    }
+  }
+
+  stream.end = function (data) {
+    if(ended) return
+    end()
+  }
+
+  stream.destroy = function () {
+    ended = destroyed = true
+    stream.writable = stream.readable = paused = false
+    process.nextTick(function () {
+      stream.emit('close')
+    })
+  }
+  stream.pause = function () {
+    paused = true
+  }
+
+  stream.resume = function () {
+    paused = false
+  }
+
+  return stream
+}
+
+
+
+
+
+}).call(this,require("FWaASH"))
+},{"FWaASH":15,"stream":33}],44:[function(require,module,exports){
+//through@2 handles this by default!
+module.exports = require('through')
+
+
+},{"through":47}],45:[function(require,module,exports){
+//filter will reemit the data if cb(err,pass) pass is truthy
+
+// reduce is more tricky
+// maybe we want to group the reductions or emit progress updates occasionally
+// the most basic reduce just emits one 'data' event after it has recieved 'end'
+
+
+var through = require('through')
+var Decoder = require('string_decoder').StringDecoder
+
+module.exports = split
+
+//TODO pass in a function to map across the lines.
+
+function split (matcher, mapper) {
+  var decoder = new Decoder()
+  var soFar = ''
+  if('function' === typeof matcher)
+    mapper = matcher, matcher = null
+  if (!matcher)
+    matcher = /\r?\n/
+
+  function emit(stream, piece) {
+    if(mapper) {
+      try {
+        piece = mapper(piece)
+      }
+      catch (err) {
+        return stream.emit('error', err)
+      }
+      if('undefined' !== typeof piece)
+        stream.queue(piece)
+    }
+    else
+      stream.queue(piece)
+  }
+
+  function next (stream, buffer) { 
+    var pieces = (soFar + buffer).split(matcher)
+    soFar = pieces.pop()
+
+    for (var i = 0; i < pieces.length; i++) {
+      var piece = pieces[i]
+      emit(stream, piece)
+    }
+  }
+
+  return through(function (b) {
+    next(this, decoder.write(b))
+  },
+  function () {
+    if(decoder.end) 
+      next(this, decoder.end())
+    if(soFar != null)
+      emit(this, soFar)
+    this.queue(null)
+  })
+}
+
+
+},{"string_decoder":34,"through":47}],46:[function(require,module,exports){
+var duplexer = require('duplexer')
+
+module.exports = function () {
+
+  var streams = [].slice.call(arguments)
+    , first = streams[0]
+    , last = streams[streams.length - 1]
+    , thepipe = duplexer(first, last)
+
+  if(streams.length == 1)
+    return streams[0]
+  else if (!streams.length)
+    throw new Error('connect called with empty args')
+
+  //pipe all the streams together
+
+  function recurse (streams) {
+    if(streams.length < 2)
+      return
+    streams[0].pipe(streams[1])
+    recurse(streams.slice(1))  
+  }
+  
+  recurse(streams)
+ 
+  function onerror () {
+    var args = [].slice.call(arguments)
+    args.unshift('error')
+    thepipe.emit.apply(thepipe, args)
+  }
+  
+  //es.duplex already reemits the error from the first and last stream.
+  //add a listener for the inner streams in the pipeline.
+  for(var i = 1; i < streams.length - 1; i ++)
+    streams[i].on('error', onerror)
+
+  return thepipe
+}
+
+
+},{"duplexer":41}],47:[function(require,module,exports){
+module.exports=require(4)
+},{"FWaASH":15,"stream":33}],"J44rJw":[function(require,module,exports){
+(function (process){
+var through = require('through')
+var isBuffer = require('isbuffer')
+var WebSocketPoly = require('ws')
+
+function WebsocketStream(server, options) {
+  if (!(this instanceof WebsocketStream)) return new WebsocketStream(server, options)
+
+  this.stream = through(this.write.bind(this), this.end.bind(this))
+
+  this.stream.websocketStream = this
+  this.options = options || {}
+  this._buffer = []
+ 
+  if (typeof server === "object") {
+    this.ws = server
+    this.ws.on('message', this.onMessage.bind(this))
+    this.ws.on('error', this.onError.bind(this))
+    this.ws.on('close', this.onClose.bind(this))
+    this.ws.on('open', this.onOpen.bind(this))
+    if (this.ws.readyState === 1) this._open = true
+  } else {
+    var opts = (process.title === 'browser') ? this.options.protocol : this.options
+    this.ws = new WebSocketPoly(server, opts)
+    this.ws.binaryType = this.options.binaryType || 'arraybuffer'
+    this.ws.onmessage = this.onMessage.bind(this)
+    this.ws.onerror = this.onError.bind(this)
+    this.ws.onclose = this.onClose.bind(this)
+    this.ws.onopen = this.onOpen.bind(this)
+  }
+  
+  return this.stream
+}
+
+module.exports = WebsocketStream
+module.exports.WebsocketStream = WebsocketStream
+
+WebsocketStream.prototype.onMessage = function(e) {
+  var data = e
+  if (typeof data.data !== 'undefined') data = data.data
+
+  // type must be a Typed Array (ArrayBufferView)
+  var type = this.options.type
+  if (type && data instanceof ArrayBuffer) data = new type(data)
+  
+  this.stream.queue(data)
+}
+
+WebsocketStream.prototype.onError = function(err) {
+  this.stream.emit('error', err)
+}
+
+WebsocketStream.prototype.onClose = function(err) {
+  if (this._destroy) return
+  this.stream.emit('end')
+  this.stream.emit('close')
+}
+
+WebsocketStream.prototype.onOpen = function(err) {
+  if (this._destroy) return
+  this._open = true
+  for (var i = 0; i < this._buffer.length; i++) {
+    this._write(this._buffer[i])
+  }
+  this._buffer = undefined
+  this.stream.emit('open')
+  this.stream.emit('connect')
+  if (this._end) this.ws.close()
+}
+
+WebsocketStream.prototype.write = function(data) {
+  if (!this._open) {
+    this._buffer.push(data)
+  } else {
+    this._write(data)
+  }
+}
+
+WebsocketStream.prototype._write = function(data) {
+  if (this.ws.readyState == 1)
+    // we are connected
+    typeof WebSocket != 'undefined' && this.ws instanceof WebSocket
+      ? this.ws.send(data)
+      : this.ws.send(data, { binary : isBuffer(data) })
+  else
+    this.stream.emit('error', 'Not connected')
+}
+
+WebsocketStream.prototype.end = function(data) {
+  if (data !== undefined) this.stream.queue(data)
+  if (this._open) this.ws.close()
+  this._end = true
+}
+
+}).call(this,require("FWaASH"))
+},{"FWaASH":15,"isbuffer":50,"through":51,"ws":52}],"websocket-stream":[function(require,module,exports){
+module.exports=require('J44rJw');
+},{}],50:[function(require,module,exports){
+var Buffer = require('buffer').Buffer;
+
+module.exports = isBuffer;
+
+function isBuffer (o) {
+  return Buffer.isBuffer(o)
+    || /\[object (.+Array|Array.+)\]/.test(Object.prototype.toString.call(o));
+}
+
+},{"buffer":5}],51:[function(require,module,exports){
+module.exports=require(4)
+},{"FWaASH":15,"stream":33}],52:[function(require,module,exports){
+
+/**
+ * Module dependencies.
+ */
+
+var global = (function() { return this; })();
+
+/**
+ * WebSocket constructor.
+ */
+
+var WebSocket = global.WebSocket || global.MozWebSocket;
+
+/**
+ * Module exports.
+ */
+
+module.exports = WebSocket ? ws : null;
+
+/**
+ * WebSocket constructor.
+ *
+ * The third `opts` options object gets ignored in web browsers, since it's
+ * non-standard, and throws a TypeError if passed to the constructor.
+ * See: https://github.com/einaros/ws/issues/227
+ *
+ * @param {String} uri
+ * @param {Array} protocols (optional)
+ * @param {Object) opts (optional)
+ * @api public
+ */
+
+function ws(uri, protocols, opts) {
+  var instance;
+  if (protocols) {
+    instance = new WebSocket(uri, protocols);
+  } else {
+    instance = new WebSocket(uri);
+  }
+  return instance;
+}
+
+if (WebSocket) ws.prototype = WebSocket.prototype;
+
+},{}],53:[function(require,module,exports){
 var d3 = require('d3')
 
 module.exports = function (options) {
@@ -16473,7 +17550,9 @@ module.exports = function (options) {
   return draw
 }
 
-},{"d3":37}],"veD7rJ":[function(require,module,exports){
+},{"d3":38}],"tree":[function(require,module,exports){
+module.exports=require('veD7rJ');
+},{}],"veD7rJ":[function(require,module,exports){
 var d3 = require('d3')
   , resize = require('./resize')
 
@@ -16512,18 +17591,9 @@ Tree.prototype.render = function () {
 
     self._nodeData.push(n)
     if (p) {
-      if (p == self._nodeData[0]) {
-        // if parent is the root, then push unto children so it's visible
-        (p.children || (p.children = [])).push(n)
-        self.draw()
-      } else {
-        // push to _children so it's hidden, no need to draw
-        (p._children || (p._children = [])).push(n)
-      }
-    } else {
-      // root, draw it.
-      self.draw()
+      (p.children || (p.children = [])).push(n)
     }
+    self.draw()
   })
 
   return this
@@ -16538,6 +17608,8 @@ Tree.prototype.resize = function () {
 
 Tree.prototype.draw = function (source) {
   var self = this
+
+  console.log(this.tree.nodes(this._nodeData[0]))
 
   this.node = this.node.data(this.tree.nodes(this._nodeData[0]), function (d) {
     return d.id
@@ -16633,6 +17705,4 @@ Tree.prototype.toggle = function (d) {
 
 module.exports = Tree
 
-},{"./resize":38,"d3":37}],"tree":[function(require,module,exports){
-module.exports=require('veD7rJ');
-},{}]},{},[])
+},{"./resize":53,"d3":38}]},{},[])

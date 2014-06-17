@@ -36,18 +36,9 @@ Tree.prototype.render = function () {
 
     self._nodeData.push(n)
     if (p) {
-      if (p == self._nodeData[0]) {
-        // if parent is the root, then push unto children so it's visible
-        (p.children || (p.children = [])).push(n)
-        self.draw()
-      } else {
-        // push to _children so it's hidden, no need to draw
-        (p._children || (p._children = [])).push(n)
-      }
-    } else {
-      // root, draw it.
-      self.draw()
+      (p.children || (p.children = [])).push(n)
     }
+    self.draw()
   })
 
   return this
