@@ -7,6 +7,8 @@ var ecstatic = require('ecstatic')(__dirname)
 
 tw.track('football')
 tw.track('soccer')
+tw.track('brazil')
+tw.track('#AUSvsNED')
 tw.track('worldcup')
 
 tw.on('tweet', io.emit.bind(io, 'tweet'))
