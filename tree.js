@@ -7,7 +7,7 @@ var Tree = function (stream) {
     height: 36,
     marginLeft: 0,
     marginTop:  18,
-    duration: 400
+    duration: 200
   }
 
   this.stream = stream

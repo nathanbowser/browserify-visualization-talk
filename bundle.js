@@ -17562,7 +17562,7 @@ var Tree = function (stream) {
     height: 36,
     marginLeft: 0,
     marginTop:  18,
-    duration: 400
+    duration: 200
   }
 
   this.stream = stream
@@ -17608,8 +17608,6 @@ Tree.prototype.resize = function () {
 
 Tree.prototype.draw = function (source) {
   var self = this
-
-  console.log(this.tree.nodes(this._nodeData[0]))
 
   this.node = this.node.data(this.tree.nodes(this._nodeData[0]), function (d) {
     return d.id
