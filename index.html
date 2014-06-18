@@ -11,16 +11,12 @@
           height: 600px;
         }
 
-        svg {
+        svg.map {
           width: 100%;
           height: 100%;
         }
 
-        svg circle.tweet {
-          fill: red;
-        }
-
-        .countries {
+        svg.map .countries {
           fill: #cde;
           stroke: #fff;
           stroke-linejoin: round;
@@ -77,6 +73,7 @@
 
   var svg = d3.select('.container')
               .append('svg')
+                .attr('class', 'map')
     , map = svg.append('g')
                  .attr('class', 'map')
     , dots = svg.append('g')
@@ -115,10 +112,12 @@
                         return d.id
                       })
     _tweets.enter()
-      .append('circle')
-        .attr('class', 'tweet')
-        .attr('r', 8)
-        .attr('xlink:href', '#soccer')
+      .append('image')
+        .attr('xlink:href', 'soccer.svg')
+        .attr('x', -10)
+        .attr('y', -10)
+        .attr('width', 20)
+        .attr('height', 20)
         .attr('transform', function (d) {
           return 'translate(' + projection(d.coords) + ')'
         })
@@ -128,6 +127,5 @@
         .style('opacity', 0)
         .remove()
   }
-
 
 </script>
