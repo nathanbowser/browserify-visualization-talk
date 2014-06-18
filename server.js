@@ -9,6 +9,4 @@ tw.track('football')
 tw.track('soccer')
 tw.track('worldcup')
 
-tw.on('tweet', function (tweet) {
-  io.emit('tweet', tweet)
-})
+tw.on('tweet', io.emit.bind(io, 'tweet'))
