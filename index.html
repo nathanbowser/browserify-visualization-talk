@@ -94,7 +94,6 @@
 
   var tweets = document.querySelector('.tweets')
     , last = null
-    , coords = []
 
   socket.on('tweet', function (tweet) {
     var li = document.createElement('li')
@@ -103,34 +102,32 @@
     last = li
 
     if (tweet.coordinates && tweet.coordinates.type === 'Point') {
-      coords.push({
+      draw({
         id: tweet.id,
         coords: tweet.coordinates.coordinates
       })
-      coords.length = coords.length < 50 ? coords.length : 50
-      draw()
     }
   })
 
-  var draw = function () {
+  var draw = function (tweet) {
     var _tweets = dots.selectAll('circle.tweet')
-                      .data(coords, function (d) {
+                      .data([tweet], function (d) {
                         return d.id
                       })
-
     _tweets.enter()
       .append('circle')
         .attr('class', 'tweet')
         .attr('r', 8)
+        .attr('xlink:href', '#soccer')
         .attr('transform', function (d) {
           return 'translate(' + projection(d.coords) + ')'
         })
-        .transition()
-        .duration(500)
         .style('opacity', 1)
-
-    _tweets.exit().transition().duration(500).style('opacity', 0).remove()
-
+        .transition()
+        .duration(10000)
+        .style('opacity', 0)
+        .remove()
   }
+
 
 </script>
