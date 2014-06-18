@@ -5,7 +5,9 @@ var ecstatic = require('ecstatic')(__dirname)
   , server = http.createServer(ecstatic).listen(3000)
   , io = require('socket.io')(server)
 
-tw.track('#WorldCup')
+tw.track('football')
+tw.track('soccer')
+tw.track('worldcup')
 
 tw.on('tweet', function (tweet) {
   io.emit('tweet', tweet)
