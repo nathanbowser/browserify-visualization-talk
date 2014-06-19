@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "bundle": "browserify -r websocket-stream -r d3 -r topojson  > bundle.js"
+    "bundle": "browserify -r websocket-stream -r d3 -r topojson -r event-stream > bundle.js"
   },
   "author": "",
   "license": "ISC",
@@ -16,6 +16,8 @@
     "ecstatic": "^0.5.3",
     "topojson": "^1.6.14",
     "node-tweet-stream": "^1.2.2",
-    "socket.io": "^1.0.4"
+    "ws": "^0.4.31",
+    "websocket-stream": "^0.5.1",
+    "event-stream": "^3.1.5"
   }
 }

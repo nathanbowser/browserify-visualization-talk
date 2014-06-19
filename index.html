@@ -54,15 +54,16 @@
 
     </style>
     <script src="bundle.js"></script>
-    <script src="/socket.io/socket.io.js"></script>
   </head>
   <body>
     <div class="container"></div>
     <ul class="tweets"></ul>
   </body>
 <script>
-  var socket = io('http://localhost')
+  var websocket = require('websocket-stream')
+    , ws = websocket('ws://localhost:3000/')
     , d3 = require('d3')
+    , es = require('event-stream')
     , topojson = require('topojson')
     , projection = d3.geo.mercator()
                      .scale(200)
@@ -92,7 +93,7 @@
   var tweets = document.querySelector('.tweets')
     , last = null
 
-  socket.on('tweet', function (tweet) {
+  ws.pipe(es.parse()).on('data', function (tweet) {
     var li = document.createElement('li')
     li.appendChild(document.createTextNode(tweet.text))
     tweets.insertBefore(li, last)
