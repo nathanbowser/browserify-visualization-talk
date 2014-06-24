@@ -13,6 +13,8 @@ tw.track('football')
 tw.track('soccer')
 tw.track('brazil')
 tw.track('worldcup')
+tw.track('greece')
+tw.track('ivorycoast')
 
 var stream = new Through({objectMode: true})
 tw.on('tweet', stream.write.bind(stream))
